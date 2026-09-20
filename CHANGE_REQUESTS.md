@@ -18,9 +18,10 @@ Site-specific values (addresses, names, tailnet) never go in this file.
 | 09 | Quiet hours | P1 | open |
 | 10 | Clock: "back to TV" and optional night clock | P2 | open |
 | 11 | Family onboarding | P1 | open |
-| 12 | Public repository preparation | P1 | open |
+| 12 | Public repository preparation | P1 | mostly done |
 | 13 | Small stuff | P2 | open |
 | 14 | Reframe the camera from the caller's page (zoom, pan, tilt) | P1 | open |
+| 15 | Pi HDMI output drops when the TV sleeps | P0 | fix ready, not applied |
 
 ---
 
@@ -173,6 +174,11 @@ Do CR-03 before the first invite goes out. Consider a short HOWTO page served by
 
 ## CR-12 Public repository preparation (P1, open)
 
+**2026-09-20:** published as `hello-mum-tv` (MIT). Done: untracked `config.json` +
+`config.example.json`, templated service unit, README, LICENSE, `deploy.sh`, fresh
+history, private-string scan. Left: `install.sh`; app buttons, channel names and preset
+numbers are still hard-coded in `static/remote.html`; a screenshot with no faces.
+
 1. Move site values out of code into an untracked `config.json` (TV address, HDMI input,
    channel and app lists, volume presets, call volume) with a tracked
    `config.example.json`.
@@ -219,4 +225,21 @@ call ends, so every call starts with the same wide view. Optional later: named v
 
 **Privacy note.** Zooming changes what the caller can see of the room and of carers.
 Default wide view and reset after each call are part of CR-01's "no surprises".
+
+## CR-15 Pi HDMI output drops when the TV sleeps (P0, fix ready, not applied)
+
+**Seen 2026-09-20.** When the Roku TV goes to standby the compositor disables the Pi's
+HDMI output (`wlr-randr`: `Enabled: no`, connector still "connected"). While the TV
+sleeps the output cannot be re-enabled (`failed to apply configuration`). On the next
+call the TV wakes to "no signal"; enabling the output mid-call froze Chromium.
+
+**In place.** `kiosk.sh` re-enables any connected-but-disabled output every 10 s (works
+only once the TV is awake) and its watchdog restarts a frozen Chromium after ~90 s. So
+the first call after a sleep can still fail once.
+
+**Fix.** Force the connector on so it never drops:
+`sudo sh ~/tvremote/tools/force-hdmi.sh <connector>` then reboot. Needs the owner's sudo.
+
+**Acceptance.** TV in standby for 10 min: `wlr-randr` still shows `Enabled: yes`; the
+next call shows the caller on the TV within seconds of it waking.
 
