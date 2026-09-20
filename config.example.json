@@ -1,0 +1,6 @@
+{
+  "TV": "http://192.168.1.50:8060",
+  "PI_INPUT": "tvinput.hdmi1",
+  "VOL_PRESETS": {"normal": 18, "loud": 45, "veryloud": 75},
+  "CALL_VOLUME": 45
+}

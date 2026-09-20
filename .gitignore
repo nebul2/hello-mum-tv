@@ -1,0 +1,14 @@
+# private site details and local state: never publish
+CLAUDE.local.md
+config.json
+volume.json
+.claude/
+
+# lives only on the Pi
+venv/
+model/
+*.zip
+
+__pycache__/
+*.pyc
+.DS_Store

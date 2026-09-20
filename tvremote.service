@@ -1,0 +1,17 @@
+# Install (replaces __USER__ with your login on the Pi):
+#   sed "s/__USER__/$USER/g" ~/tvremote/tvremote.service | sudo tee /etc/systemd/system/tvremote.service
+#   sudo systemctl daemon-reload && sudo systemctl enable --now tvremote
+[Unit]
+Description=Mum's TV remote and Call Mum
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=__USER__
+WorkingDirectory=/home/__USER__/tvremote
+ExecStart=/home/__USER__/tvremote/venv/bin/python /home/__USER__/tvremote/tvremote.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>Mum's screen</title>
+<!-- non-blocking: the clock must still appear if the internet is down -->
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:#0E151B;color:#F4F6F2;overflow:hidden;cursor:none}
+body{font-family:"Atkinson Hyperlegible",system-ui,sans-serif}
+
+#idle{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;padding:0 8vw;
+  background:radial-gradient(120% 120% at 15% 10%, #2E4A5E 0%, #16242F 55%, #0E151B 100%)}
+#part{font-size:6.5vw;font-weight:700;line-height:1.1}
+#time{font-size:15vw;font-weight:700;line-height:1;margin:1vw 0;color:#FFE9A8;font-variant-numeric:tabular-nums}
+#date{font-size:4.2vw;color:#C4D2D9}
+
+#call{position:absolute;inset:0;display:none;background:#000}
+#call.show{display:block}
+#video{width:100%;height:100%;object-fit:contain}
+#who{position:absolute;top:3vh;left:3vw;font-size:4.5vw;font-weight:700;
+  text-shadow:0 2px 8px rgba(0,0,0,.8)}
+#status{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  font-size:6vw;font-weight:700;text-align:center;padding:0 6vw}
+#status:empty{display:none}
+#caption{position:absolute;left:4vw;right:4vw;bottom:4vh;text-align:center;white-space:pre-line;
+  font-size:4.6vw;font-weight:700;line-height:1.25;color:#FFE27A;
+  background:rgba(0,0,0,.72);border-radius:1.2vw;padding:1vw 2vw}
+#caption:empty{display:none}
+</style>
+</head>
+<body>
+<div id="idle">
+  <div id="part"></div>
+  <div id="time"></div>
+  <div id="date"></div>
+</div>
+
+<div id="call">
+  <video id="video" autoplay playsinline></video>
+  <div id="who"></div>
+  <div id="status"></div>
+  <div id="caption"></div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+
+/* ---------- idle clock: day and part of day help with orientation ---------- */
+function tick(){
+  const d = new Date(), h = d.getHours();
+  const part = h < 12 ? 'morning' : h < 17 ? 'afternoon' : h < 21 ? 'evening' : 'night';
+  $('part').textContent = d.toLocaleDateString('en-GB', {weekday:'long'}) + ' ' + part;
+  $('time').textContent = d.toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
+  $('date').textContent = d.toLocaleDateString('en-GB', {day:'numeric', month:'long', year:'numeric'});
+}
+tick(); setInterval(tick, 10000);
+
+/* ---------- call ---------- */
+let pc = null, stream = null, callId = null, handled = null, stt = null, meter = null;
+
+function iceDone(p){
+  return new Promise(res=>{
+    if(p.iceGatheringState === 'complete') return res();
+    const t = setTimeout(res, 3000);
+    p.addEventListener('icegatheringstatechange', ()=>{ if(p.iceGatheringState === 'complete'){ clearTimeout(t); res(); } });
+  });
+}
+const postJSON = (url, obj) => fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(obj)});
+
+function showCall(name){
+  $('idle').style.display = 'none';
+  $('call').classList.add('show');
+  $('who').textContent = name;
+  $('status').textContent = name + ' is calling…';
+  $('caption').textContent = '';
+}
+function showIdle(){
+  $('call').classList.remove('show');
+  $('idle').style.display = 'flex';
+  $('video').srcObject = null;
+  $('caption').textContent = '';
+}
+
+async function answer(s){
+  callId = s.id; showCall(s.caller);
+  try{
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio:{echoCancellation:true, noiseSuppression:true, autoGainControl:true},
+      video:{width:{ideal:1280}, height:{ideal:720}}
+    });
+    pc = new RTCPeerConnection({iceServers:[]});
+    stream.getTracks().forEach(t=>pc.addTrack(t, stream));
+    pc.ontrack = e => {
+      const v = $('video');
+      if(v.srcObject !== e.streams[0]){ v.srcObject = e.streams[0]; v.play().catch(()=>{}); }
+      if(e.track.kind === 'audio' && s.stt && !stt) startStt(e.streams[0]);
+    };
+    pc.onconnectionstatechange = () => {
+      if(!pc) return;
+      if(pc.connectionState === 'connected') $('status').textContent = '';
+      if(pc.connectionState === 'failed') endCall('connection failed');
+    };
+    await pc.setRemoteDescription({type:'offer', sdp:s.offer});
+    await pc.setLocalDescription(await pc.createAnswer());
+    await iceDone(pc);
+    await postJSON('/api/call/answer', {id:callId, answer:pc.localDescription.sdp});
+    startMeter();
+  }catch(e){
+    console.error(e);
+    endCall('TV screen error: ' + (e.name || 'unknown'));
+  }
+}
+
+/* ---------- room loudness for the caller: a number twice a second, no audio leaves this page ---------- */
+async function startMeter(){
+  const id = callId;
+  try{
+    /* unprocessed mic, so the TV's own sound is measured rather than cancelled out */
+    const raw = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false, noiseSuppression:false, autoGainControl:false}});
+    if(callId !== id || meter){ raw.getTracks().forEach(t=>t.stop()); return; }
+    const ctx = new AudioContext(), an = ctx.createAnalyser(); an.fftSize = 2048;
+    ctx.createMediaStreamSource(raw).connect(an);
+    const buf = new Float32Array(an.fftSize); let peak = -100;
+    const t1 = setInterval(()=>{
+      an.getFloatTimeDomainData(buf);
+      let sum = 0; for(let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+      peak = Math.max(peak, 10 * Math.log10(sum / buf.length + 1e-10));
+    }, 100);
+    const t2 = setInterval(()=>{
+      const level = Math.round(Math.max(0, Math.min(100, (peak + 60) * 2)));   /* -60..-10 dBFS -> 0..100 */
+      peak = -100;
+      if(callId === id) postJSON('/api/call/level', {id, level}).catch(()=>{});
+    }, 500);
+    meter = {raw, ctx, t1, t2};
+  }catch(e){ console.error(e); }
+}
+function stopMeter(){
+  if(!meter) return;
+  clearInterval(meter.t1); clearInterval(meter.t2);
+  meter.raw.getTracks().forEach(t=>t.stop());
+  try{ meter.ctx.close(); }catch(e){}
+  meter = null;
+}
+
+function teardown(){
+  stopMeter();
+  if(stt){ try{ stt.ctx.close(); }catch(e){} stt = null; }
+  if(pc){ pc.close(); pc = null; }
+  if(stream){ stream.getTracks().forEach(t=>t.stop()); stream = null; }
+  callId = null;
+  showIdle();
+}
+function endCall(reason){
+  if(callId) postJSON('/api/call/end', {id:callId, reason}).catch(()=>{});
+  teardown();
+}
+
+/* ---------- live subtitles: send the caller's voice to the Pi as 16 kHz PCM ---------- */
+function startStt(remoteStream){
+  const ctx = new AudioContext({sampleRate:16000});
+  const src = ctx.createMediaStreamSource(remoteStream);
+  const proc = ctx.createScriptProcessor(4096, 1, 1);
+  const silent = ctx.createGain(); silent.gain.value = 0;
+  src.connect(proc); proc.connect(silent); silent.connect(ctx.destination);
+  const queue = []; let busy = false; const id = callId;
+  stt = {ctx};
+  proc.onaudioprocess = e => {
+    const f = e.inputBuffer.getChannelData(0), out = new Int16Array(f.length);
+    for(let i = 0; i < f.length; i++){ const v = Math.max(-1, Math.min(1, f[i])); out[i] = v < 0 ? v * 0x8000 : v * 0x7fff; }
+    queue.push(out); flush();
+  };
+  async function flush(){
+    if(busy || !queue.length || callId !== id) return;
+    busy = true;
+    const n = queue.reduce((a, b)=>a + b.length, 0), all = new Int16Array(n);
+    let o = 0; for(const q of queue.splice(0)){ all.set(q, o); o += q.length; }
+    try{
+      const j = await (await fetch('/api/stt?id=' + id, {method:'POST', body:all.buffer})).json();
+      if(callId === id) $('caption').textContent = j.caption || '';
+    }catch(e){}
+    busy = false; flush();
+  }
+}
+
+/* ---------- ask the Pi every second whether someone is calling ---------- */
+/* only reload when the Pi is answering, so the TV never lands on a browser error page */
+async function safeReload(){
+  try{ if((await fetch('/mum', {cache:'no-store'})).ok) location.reload(); }catch(e){}
+}
+
+let ver = null;
+async function poll(){
+  let s;
+  try{ s = await (await fetch('/api/call?role=mum')).json(); }catch(e){ return; }
+  if(s.ver){ if(ver === null) ver = s.ver; else if(s.ver !== ver && !callId && s.state === 'idle') return safeReload(); }
+  if(s.state === 'ringing' && s.id !== handled && !pc){ handled = s.id; answer(s); }
+  else if(s.state === 'idle' && callId){ teardown(); }
+  else if(s.state === 'active' && s.id === callId && !stt){ $('caption').textContent = s.caption || ''; }
+}
+setInterval(poll, 1000);
+
+/* fresh start every 6 hours when nobody is calling */
+setInterval(()=>{ if(!callId) safeReload(); }, 6 * 3600 * 1000);
+</script>
+</body>
+</html>
