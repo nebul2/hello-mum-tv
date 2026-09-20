@@ -20,8 +20,8 @@ Site-specific values (addresses, names, tailnet) never go in this file.
 | 11 | Family onboarding | P1 | open |
 | 12 | Public repository preparation | P1 | mostly done |
 | 13 | Small stuff | P2 | open |
-| 14 | Reframe the camera from the caller's page (zoom, pan, tilt) | P1 | open |
-| 15 | Pi HDMI output drops when the TV sleeps | P0 | fix ready, not applied |
+| 14 | Reframe the camera from the caller's page (zoom, pan, tilt) | P1 | testing |
+| 15 | Pi HDMI output drops when the TV sleeps | P0 | applied, watching |
 
 ---
 
@@ -223,10 +223,18 @@ ranges above, only while a call is active, runs `v4l2-ctl`. Reset to defaults wh
 call ends, so every call starts with the same wide view. Optional later: named views
 ("bed", "chair", "door") saved in the untracked config.
 
+**2026-09-20: built and tested live.** Zoom, pan and tilt are digital and change
+mid-call without a glitch. `POST /api/camera/<zoomin|zoomout|left|right|up|down|reset>?id=<call>`
+works only for the caller of the active call; values are clamped; every call starts and
+ends on the wide view; zooming out to 0 re-centres. Seven buttons in the call view.
+On this camera pan + = right and tilt + = down. Left to decide: step size
+(`CAM_PT_STEP`), whether to cap zoom below 9 if it is too soft, backlight toggle,
+named views.
+
 **Privacy note.** Zooming changes what the caller can see of the room and of carers.
 Default wide view and reset after each call are part of CR-01's "no surprises".
 
-## CR-15 Pi HDMI output drops when the TV sleeps (P0, fix ready, not applied)
+## CR-15 Pi HDMI output drops when the TV sleeps (P0, applied, watching)
 
 **Seen 2026-09-20.** When the Roku TV goes to standby the compositor disables the Pi's
 HDMI output (`wlr-randr`: `Enabled: no`, connector still "connected"). While the TV
@@ -242,4 +250,9 @@ the first call after a sleep can still fail once.
 
 **Acceptance.** TV in standby for 10 min: `wlr-randr` still shows `Enabled: yes`; the
 next call shows the caller on the TV within seconds of it waking.
+
+**2026-09-20 evening.** `force-hdmi.sh` applied and rebooted. With the TV in standby the
+output stayed `Enabled: yes` (before: `no`, and impossible to enable). Calls that woke
+the TV worked. Still to confirm over a full night, and by eye that the picture is there
+the moment the TV wakes. The TV cable must stay in the forced port.
 

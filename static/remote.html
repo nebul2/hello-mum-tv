@@ -82,6 +82,9 @@ summary{cursor:pointer;font-weight:700;padding:10px 2px;color:var(--soft)}
 .meter i{display:block;height:100%;width:0;border-radius:6px;background:var(--sage);transition:width .4s linear}
 .meter i.loud{background:var(--glow)}
 .volnote{margin:8px 2px 0;color:var(--soft);font-size:.9rem}
+.camctl{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+#callview .camctl button{min-height:46px;padding:4px;font-size:1.05rem}
+#callview .camctl .reset{font-size:.8rem}
 .callctl{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .callctl .wide{grid-column:1 / -1}
 
@@ -198,6 +201,15 @@ summary{cursor:pointer;font-weight:700;padding:10px 2px;color:var(--soft)}
     <span>Room sound</span>
     <div class="meter" role="img" aria-label="How loud it is in Mum's room"><i id="meterBar"></i></div>
   </div>
+  <div class="camctl" aria-label="Camera view">
+    <button data-cam="zoomout" aria-label="Zoom out">−</button>
+    <button data-cam="zoomin" aria-label="Zoom in">+</button>
+    <button data-cam="left" aria-label="Look left">◀</button>
+    <button data-cam="up" aria-label="Look up">▲</button>
+    <button data-cam="down" aria-label="Look down">▼</button>
+    <button data-cam="right" aria-label="Look right">▶</button>
+    <button data-cam="reset" class="reset">Wide</button>
+  </div>
   <div class="callctl">
     <button data-key="VolumeDown" data-n="2">Quieter</button>
     <button class="louder" data-key="VolumeUp" data-n="3">Louder</button>
@@ -260,6 +272,14 @@ async function refresh(){
 
 document.addEventListener('click', async (ev)=>{
   const b = ev.target.closest('button'); if(!b) return;
+  if(b.dataset.cam){
+    if(!callId) return;
+    try{
+      const r = await postJSON('/api/camera/' + b.dataset.cam + '?id=' + callId, {});
+      if(r.ok){ const c = await r.json(); say(c.zoom ? 'Zoom ' + c.zoom + ' of 9' : 'Wide view'); }
+    }catch(e){}
+    return;
+  }
   let url;
   if(b.dataset.key) url = '/api/key/' + b.dataset.key + (b.dataset.n ? '?n=' + b.dataset.n : '');
   else if(b.dataset.app) url = '/api/launch/' + encodeURIComponent(b.dataset.app);

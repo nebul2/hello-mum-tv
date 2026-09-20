@@ -30,6 +30,10 @@ PORT = 8080
 PI_INPUT = "tvinput.hdmi1"   # TV input the Pi is plugged into (hdmi1/hdmi2/hdmi3)
 LED_PIN = 17                 # GPIO for the red "on a call" light
 RING_TIMEOUT = 30            # seconds before an unanswered call is dropped
+CAMERA_DEV = "/dev/video0"   # webcam, for zoom / pan / tilt during calls (UVC controls)
+CAM_ZOOM_MAX = 9             # zoom_absolute range is 0..CAM_ZOOM_MAX
+CAM_PT_MAX = 36000           # pan_absolute / tilt_absolute range is -MAX..MAX
+CAM_PT_STEP = 7200           # how far one press of an arrow moves the view
 CAPTION_LINES = 2            # subtitles never cover more than this many lines of the TV
 CAPTION_CHARS = 32           # characters per subtitle line at the TV's font size
 CAPTION_KEEP = 6             # seconds a finished sentence stays up
@@ -58,7 +62,8 @@ CHANNEL_RE = re.compile(r"^\d{1,4}(\.\d{1,3})?$")
 
 CONFIGURABLE = {"TV", "PORT", "PI_INPUT", "LED_PIN", "RING_TIMEOUT", "CALLER_TIMEOUT",
                 "VOL_PRESETS", "CALL_VOLUME", "VOL_MAX", "VOL_KEY_GAP", "VOL_UP_GAP",
-                "CAPTION_LINES", "CAPTION_CHARS", "CAPTION_KEEP", "APPS"}
+                "CAPTION_LINES", "CAPTION_CHARS", "CAPTION_KEEP", "APPS",
+                "CAMERA_DEV", "CAM_ZOOM_MAX", "CAM_PT_MAX", "CAM_PT_STEP"}
 try:
     with open(os.path.join(HERE, "config.json")) as f:
         for _k, _v in json.load(f).items():
@@ -233,6 +238,37 @@ def call_volume_back(c):
         vol_save()
 
 
+# ---- camera view ------------------------------------------------------------
+# The caller can zoom and move the (digital) view during a call. Every call starts
+# and ends on the wide view, so nobody is left zoomed in on part of the room.
+cam_lock = threading.Lock()
+cam = {"zoom": 0, "pan": 0, "tilt": 0}
+CAM_ACTIONS = {"zoomin": ("zoom", 1), "zoomout": ("zoom", -1), "right": ("pan", 1),
+               "left": ("pan", -1), "down": ("tilt", 1), "up": ("tilt", -1), "reset": None}
+
+
+def cam_move(action):
+    with cam_lock:
+        if action == "reset":
+            cam.update(zoom=0, pan=0, tilt=0)
+        else:
+            axis, sign = CAM_ACTIONS[action]
+            if axis == "zoom":
+                cam["zoom"] = max(0, min(CAM_ZOOM_MAX, cam["zoom"] + sign))
+                if cam["zoom"] == 0:
+                    cam.update(pan=0, tilt=0)     # the wide view cannot be moved
+            else:
+                cam[axis] = max(-CAM_PT_MAX, min(CAM_PT_MAX, cam[axis] + sign * CAM_PT_STEP))
+        try:
+            subprocess.run(
+                ["v4l2-ctl", "-d", CAMERA_DEV, "-c",
+                 f"zoom_absolute={cam['zoom']},pan_absolute={cam['pan']},tilt_absolute={cam['tilt']}"],
+                capture_output=True, timeout=3)
+        except Exception as e:
+            print(f"camera control failed: {e}", flush=True)
+        return dict(cam)
+
+
 # ---- peek at the Pi's screen ------------------------------------------------
 # A small live picture of what the Pi is showing on the TV, for the family remote.
 # Held in memory for a couple of seconds only; never written to disk.
@@ -308,6 +344,7 @@ def end_call(reason, cid=None):
         old, call = call, {"state": "idle"}
         last_end = {"id": old["id"], "reason": reason}
     light(False)
+    threading.Thread(target=cam_move, args=("reset",), daemon=True).start()
     mins = (time.time() - old["started"]) / 60
     print(f"call from {old['caller']} ended after {mins:.1f} min: {reason}", flush=True)
     threading.Thread(target=tv_restore, args=(old,), daemon=True).start()
@@ -359,6 +396,7 @@ def call_view(role, cid):
     v.update(id=c["id"], caller=c["caller"], caption=caption(c))
     if role == "caller":
         v["vol"] = dict(vol)
+        v["cam"] = dict(cam)
         if time.time() - c.get("level_at", 0) < 3:
             v["level"] = c["level"]
     if role == "mum" and c["state"] == "ringing":
@@ -462,6 +500,15 @@ class Handler(BaseHTTPRequestHandler):
                     c["partial"] = json.loads(c["rec"].PartialResult()).get("partial", "")
             return self._json(200, {"caption": caption(c)})
 
+        # --- camera view, only for the caller of the call in progress
+        if parts[:2] == ["api", "camera"] and len(parts) == 3:
+            c = call
+            if c["state"] != "active" or c["id"] != q.get("id", [""])[0]:
+                return self._json(409, {"error": "no call"})
+            if parts[2] not in CAM_ACTIONS:
+                return self._json(400, {"error": "not allowed"})
+            return self._json(200, cam_move(parts[2]))
+
         # --- call control
         if parts[:2] == ["api", "call"] and len(parts) == 3:
             try:
@@ -487,6 +534,7 @@ class Handler(BaseHTTPRequestHandler):
                     }
                     c = call
                 light(True)
+                cam_move("reset")
                 print(f"call from {name} ({self._who()}) started", flush=True)
                 threading.Thread(target=tv_to_call, args=(c,), daemon=True).start()
                 return self._json(200, {"id": c["id"]})

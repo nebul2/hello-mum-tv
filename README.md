@@ -19,6 +19,8 @@ run unattended for months.
 - **Live subtitles** of the caller's speech on the TV (offline, [Vosk](https://alphacephei.com/vosk/)),
   rolled up in two large lines.
 - **Call volume**: sets a known loud level for the call and steps back afterwards.
+- **Camera zoom and pan** from the caller's page (digital, UVC controls); every call
+  starts and ends on the wide view.
 - **Room loudness bar** for the caller, so you can tell how loud the TV really is.
 - **Family remote**: power, volume with presets, channels, app launches, d-pad,
   "show clock", and a live peek of what the Pi is showing.
