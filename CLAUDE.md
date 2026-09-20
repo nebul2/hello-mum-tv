@@ -19,7 +19,13 @@ screen with live subtitles, then puts the TV back as it was. Runs unattended for
 - `static/mum.html` at `/mum`: the TV screen in Chromium kiosk. Idle = day, part of day,
   clock, date. Auto-answers calls. Reloads itself after a deploy.
 - `kiosk.sh`: started from `~/.config/labwc/autostart`. Waits for the server, respawns
-  Chromium, restarts it if `/api/health` says the page stopped polling.
+  Chromium, restarts it if `/api/health` says the page stopped polling, re-enables a
+  disabled HDMI output.
+- `config.json` (untracked, deployed with the rest): site values that override the
+  constants in `tvremote.py`. `config.example.json` is the tracked template.
+- `deploy.sh [host]`: rsync + restart; refuses to restart during a call or preset.
+  Always deploy with it. Never restart the server any other way while calls are possible.
+- `tools/force-hdmi.sh`: adds `video=<connector>:<mode>D` to the kernel command line.
 - Callers use HTTPS from `tailscale serve` (needed for camera access). Signalling is HTTP
   polling, non-trickle ICE, no ICE servers: both ends are on the tailnet.
 
@@ -33,6 +39,18 @@ screen with live subtitles, then puts the TV back as it was. Runs unattended for
 - Room loudness: `mum.html` opens a second, unprocessed mic stream during calls and
   posts a 0-100 number. Numbers only.
 - `/api/screen` is a `grim` screenshot of the Pi's own display, held in memory ~2 s.
+- When the TV sleeps the compositor disables the Pi's HDMI output and it cannot be
+  re-enabled until the TV wakes; enabling it mid-call froze Chromium. Cure: force the
+  connector on (`tools/force-hdmi.sh`), cable stays in that port. See CR-15.
+- `/mum` and the TV-side call endpoints answer only to the Pi's own browser
+  (`_on_pi()`: loopback and no proxy headers); `tailscale serve` also arrives from
+  127.0.0.1, which is why the header check matters.
+- Camera zoom / pan / tilt are UVC controls set with `v4l2-ctl` while Chromium streams;
+  pan + = right, tilt + = down on the current camera; reset to wide at call start and end.
+- Subtitles are roll-up: wrapped from the start of each utterance, last
+  `CAPTION_LINES` lines only, so a long monologue never fills the screen.
+- The server also runs on a laptop with a dummy TV address (see README, "Hacking on
+  it"). Never run a dev copy against the real TV.
 - Restart without sudo: `kill $(systemctl show -p MainPID --value tvremote)`; systemd
   respawns it in 5 s. Never restart during a call or a volume preset (check
   `/api/call?role=x` is idle and `/api/status` has `"busy": false`).

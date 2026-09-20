@@ -54,7 +54,13 @@ person. Treat that seriously.
   labwc / Wayland).
 - A Roku TV or Roku player on the same network ("Control by mobile apps" enabled, fast
   start / warm standby on, so it can be woken over the network).
-- A USB webcam with a microphone, placed by the TV.
+- A USB webcam with a microphone, placed by the TV. A plain wired USB (UVC) webcam is
+  all you need. A "wireless" webcam brings no benefit here: the Pi sits right behind
+  the TV anyway, and a radio link only adds a battery to charge, latency and one more
+  thing to fail. Worth paying for instead: **zoom and pan** (UVC `zoom_absolute`,
+  `pan_absolute`, `tilt_absolute`; check with `v4l2-ctl --list-ctrls`), which the
+  caller's page can drive, a wide lens, and a decent microphone. A physical lens cover
+  is a plus.
 - Optional: a bright light on GPIO17 that is on during calls.
 
 Other TVs would need their own control code in place of the Roku ECP calls in
@@ -75,7 +81,9 @@ over the tailnet (no STUN / TURN servers).
 - `tvremote.py`: the whole server, Python standard library only (plus optional `vosk`
   and `gpiozero`).
 - `kiosk.sh`: keeps Chromium and the display alive.
-- `tools/force-hdmi.sh`: keeps the Pi's HDMI output on when the TV sleeps.
+- `tools/force-hdmi.sh`: keeps the Pi's HDMI output on when the TV sleeps. You will
+  almost certainly need it: without it the TV wakes to "no signal" (see CR-15).
+- `config.json` (yours, untracked) / `config.example.json`: site settings.
 - `deploy.sh`: copy to the Pi and restart, never during a call.
 
 ## Install (outline)
@@ -106,6 +114,33 @@ tailnet.
 
 Family members: install Tailscale, accept a share invite for the Pi, open the page,
 add it to the home screen. Never use Tailscale Funnel or port forwarding for this.
+
+After the first boot run `sudo sh ~/tvremote/tools/force-hdmi.sh HDMI-A-1` (or
+`HDMI-A-2`, whichever port `wlr-randr` shows the TV on) and reboot, and keep the cable
+in that port.
+
+## Hacking on it (no Pi or TV needed)
+
+The server is one standard-library Python file and runs on any laptop:
+
+```sh
+git clone https://github.com/nebul2/hello-mum-tv && cd hello-mum-tv
+echo '{"TV": "http://127.0.0.1:9"}' > config.json    # a TV address that goes nowhere
+python3 tvremote.py
+```
+
+Open `http://localhost:8080/mum` in one tab (the "TV") and `http://localhost:8080/` in
+another (the caller), press Call Mum: `localhost` counts as secure, so camera and mic
+work and you can call yourself. Without a Roku the remote says "Can't reach the TV",
+without `vosk` there are no subtitles, without `grim` / `v4l2-ctl` no screen peek or
+camera moves; everything else works. **Never point a dev copy at a real TV in someone's
+bedroom.**
+
+Send changes as pull requests. House rules: standard library only unless there is a
+very good reason; nothing that records or stores audio or video, ever; no addresses,
+names, tailnet names or health details in code, commits, issues or screenshots; test
+calls, volume and TV power on your own kit, not on the live system. Deploys to the live
+Pi are done by one person, with `deploy.sh`, never during a call.
 
 ## Settings
 
