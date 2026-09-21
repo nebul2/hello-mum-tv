@@ -22,6 +22,7 @@ Site-specific values (addresses, names, tailnet) never go in this file.
 | 13 | Small stuff | P2 | open |
 | 14 | Reframe the camera from the caller's page (zoom, pan, tilt) | P1 | testing |
 | 15 | Pi HDMI output drops when the TV sleeps | P0 | applied, watching |
+| 16 | Survive being unattended: power, hangs, network, remote diagnosis | P1 | open |
 
 ---
 
@@ -255,4 +256,28 @@ next call shows the caller on the TV within seconds of it waking.
 output stayed `Enabled: yes` (before: `no`, and impossible to enable). Calls that woke
 the TV worked. Still to confirm over a full night, and by eye that the picture is there
 the moment the TV wakes. The TV cable must stay in the forced port.
+
+## CR-16 Survive being unattended (P1, open)
+
+**Seen 2026-09-21.** The Pi went offline with nobody on site. From outside there was no
+way to tell a pulled plug from a hung Pi, a Wi-Fi drop or an internet outage, because
+the Pi is the only vantage point in the house.
+
+**Proposed changes.**
+1. Labels on the plug and the Pi: what it is, please do not unplug, who to phone.
+2. Hardware watchdog so a hung Pi reboots itself (`RuntimeWatchdogSec=` in
+   `/etc/systemd/system.conf`; needs sudo). Also restart on kernel panic.
+3. Wired Ethernet if the Pi is on Wi-Fi; active cooler if it has none; official power
+   supply.
+4. Boot-time note of how the last session ended (clean shutdown, power loss, watchdog),
+   shown on the remote page: "Pi restarted at HH:MM after a power cut".
+5. Make the idle clock show a small "no network" mark when the Pi has been offline for a
+   few minutes, so someone in the room can tell a network fault from a dead Pi.
+6. A second vantage point in the house (e.g. a smart plug feeding the Pi, which also
+   allows a remote power cycle). Adds a cloud dependency: decide deliberately.
+7. Reduce SD card wear (log volume, `noatime`), and keep a spare imaged card on site.
+8. A one-page "if it stops working" sheet for carers: check lights, pull plug 10 s, done.
+
+**Acceptance.** A hung Pi recovers by itself within minutes. After any outage the owner
+can say what happened from the logs. A carer can do the one physical fix without help.
 
