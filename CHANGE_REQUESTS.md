@@ -23,6 +23,7 @@ Site-specific values (addresses, names, tailnet) never go in this file.
 | 14 | Reframe the camera from the caller's page (zoom, pan, tilt) | P1 | testing |
 | 15 | Pi HDMI output drops when the TV sleeps | P0 | applied, watching |
 | 16 | Survive being unattended: power, hangs, network, remote diagnosis | P1 | open |
+| 17 | HDMI audio sink vanishes (Dummy Output), TV page stops answering | P1 | mitigated |
 
 ---
 
@@ -280,4 +281,26 @@ the Pi is the only vantage point in the house.
 
 **Acceptance.** A hung Pi recovers by itself within minutes. After any outage the owner
 can say what happened from the logs. A carer can do the one physical fix without help.
+
+## CR-17 HDMI audio sink vanishes, TV page stops answering (P1, mitigated)
+
+**Seen 2026-09-23.** Calls connected but the TV was silent: PipeWire's default sink had
+become "Dummy Output"; the HDMI sink was gone although the connector was up and the
+ELD named the TV. Kernel logged `hdmi-audio-codec: HDMI: Unknown ELD version 0` each
+time the TV switched input. Someone on site then changed the TV's audio output setting;
+after that the TV page kept polling but never answered calls ("no answer"), most likely
+Chromium's getUserMedia hanging on the broken audio stack. Also: the Pi's HDMI sink sat
+at 40 %, so the TV sounded quiet whatever its own volume.
+
+**Mitigation in place.** `kiosk.sh` checks every 10 s: sink is "Dummy Output" → restart
+wireplumber / pipewire; always keep the default sink at 100 %, unmuted. Manual fix that
+worked: restart audio services, then Chromium.
+
+**Still to do.**
+1. Detect "page polls but does not answer": server marks a call `no answer` while
+   `mum_age` is 0 → kiosk restarts Chromium.
+2. Find why the sink drops (ELD version 0 after TV input switch; forced `video=` mode
+   may be involved). Options: pin the HDMI sink profile in WirePlumber, or restart audio
+   automatically after every call start.
+3. Remote page: show "TV sound: OK / lost" from a `/api/health` field.
 
