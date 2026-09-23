@@ -14,9 +14,24 @@ fix_display() {
     done
 }
 
+# HDMI audio sometimes vanishes (kernel: "Unknown ELD version 0" when the TV switches
+# input), leaving PipeWire on "Dummy Output" and the TV silent. Restarting the audio
+# services brings the HDMI sink back.
+fix_audio() {
+    if wpctl status 2>/dev/null | grep -q "Dummy Output"; then
+        echo "$(date +%T) audio sink lost, restarting pipewire"
+        systemctl --user restart wireplumber pipewire pipewire-pulse
+        sleep 5
+    fi
+    # the Pi has no speaker: send full level over HDMI and let the TV's volume rule
+    wpctl set-volume @DEFAULT_AUDIO_SINK@ 1.0 2>/dev/null
+    wpctl set-mute @DEFAULT_AUDIO_SINK@ 0 2>/dev/null
+}
+
 while :; do
     until curl -sf -m 5 -o /dev/null "$URL"; do sleep 2; done
     fix_display
+    fix_audio
 
     chromium --kiosk --noerrdialogs --disable-infobars --no-first-run \
         --disable-session-crashed-bubble --hide-crash-restore-bubble \
@@ -28,6 +43,7 @@ while :; do
     while kill -0 "$pid" 2>/dev/null; do
         sleep 10
         fix_display
+        fix_audio
         # Only judge the page while the server is answering; if the server is
         # down the page keeps polling and recovers by itself.
         age=$(curl -sf -m 5 "$HEALTH" | sed -n 's/.*"mum_age": *\([0-9]*\).*/\1/p')
