@@ -34,7 +34,10 @@ while :; do
     fix_display
     fix_audio
 
-    chromium --kiosk --noerrdialogs --disable-infobars --no-first-run \
+    # --disable-gpu: Chromium's GPU process on the Pi 5 crashed or hung every day or
+    # two (white screen, frozen video, unanswered calls). Software rendering is fine
+    # for one video and a clock, and has been stable.
+    chromium --kiosk --noerrdialogs --disable-infobars --no-first-run --disable-gpu \
         --disable-session-crashed-bubble --hide-crash-restore-bubble \
         --password-store=basic --autoplay-policy=no-user-gesture-required \
         --use-fake-ui-for-media-stream "$URL" &
