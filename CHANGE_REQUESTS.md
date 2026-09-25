@@ -23,7 +23,7 @@ Site-specific values (addresses, names, tailnet) never go in this file.
 | 14 | Reframe the camera from the caller's page (zoom, pan, tilt) | P1 | testing |
 | 15 | Pi HDMI output drops when the TV sleeps | P0 | applied, watching |
 | 16 | Survive being unattended: power, hangs, network, remote diagnosis | P1 | open |
-| 17 | HDMI audio sink vanishes (Dummy Output), TV page stops answering | P1 | mitigated |
+| 17 | HDMI audio sink vanishes (Dummy Output), TV page stops answering | P1 | mostly done |
 
 ---
 
@@ -296,9 +296,16 @@ at 40 %, so the TV sounded quiet whatever its own volume.
 wireplumber / pipewire; always keep the default sink at 100 %, unmuted. Manual fix that
 worked: restart audio services, then Chromium.
 
+**2026-09-25.** Happened again: Chromium renderer hung (white screen in the peek,
+polling continued), a sibling's first calls got "no answer". Now handled: the TV page
+sends a `requestAnimationFrame` counter with every poll; `/api/health` reports
+`frozen` (seconds since the last drawn frame) and `page_stuck` (a call went unanswered
+while the page was polling); `kiosk.sh` restarts Chromium on either, and once a day at
+04:00 when idle.
+
 **Still to do.**
-1. Detect "page polls but does not answer": server marks a call `no answer` while
-   `mum_age` is 0 → kiosk restarts Chromium.
+1. Find out why the renderer hangs (GPU process? memory after ~24 h?). `journalctl` and
+   `/tmp/kiosk.log` after the next event.
 2. Find why the sink drops (ELD version 0 after TV input switch; forced `video=` mode
    may be involved). Options: pin the HDMI sink profile in WirePlumber, or restart audio
    automatically after every call start.

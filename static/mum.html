@@ -191,9 +191,11 @@ async function safeReload(){
 }
 
 let ver = null;
+let frames = 0;
+(function raf(){ frames++; requestAnimationFrame(raf); })();   /* proves the page is still drawing */
 async function poll(){
   let s;
-  try{ s = await (await fetch('/api/call?role=mum')).json(); }catch(e){ return; }
+  try{ s = await (await fetch('/api/call?role=mum&frames=' + frames)).json(); }catch(e){ return; }
   if(s.ver){ if(ver === null) ver = s.ver; else if(s.ver !== ver && !callId && s.state === 'idle') return safeReload(); }
   if(s.state === 'ringing' && s.id !== handled && !pc){ handled = s.id; answer(s); }
   else if(s.state === 'idle' && callId){ teardown(); }

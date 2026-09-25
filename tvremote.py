@@ -294,6 +294,10 @@ stt_lock = threading.Lock()
 call = {"state": "idle"}
 last_end = {}
 mum_seen = time.time()   # last time the TV screen page checked in (kiosk.sh watches this)
+# The page also sends a frame counter. Chromium can keep polling with a hung renderer
+# (white screen, never answers a call); the counter stops, and kiosk.sh restarts it.
+mum_frames = {"n": -1, "changed": time.time()}
+page_stuck = {"at": 0.0}
 
 
 def page_ver():
@@ -365,6 +369,9 @@ def watchdog():
             except Exception:
                 pass
         if c["state"] == "ringing" and time.time() - c["started"] > RING_TIMEOUT:
+            if time.time() - mum_seen < 5:
+                page_stuck["at"] = time.time()
+                print("TV page is polling but did not answer: asking kiosk to restart it", flush=True)
             end_call("no answer", c["id"])
         elif c["state"] == "active" and time.time() - c["seen"] > CALLER_TIMEOUT:
             end_call("caller gone", c["id"])
@@ -382,13 +389,15 @@ def caption(c):
     return "\n".join(lines[-CAPTION_LINES:])
 
 
-def call_view(role, cid):
+def call_view(role, cid, frames=None):
     global mum_seen
     c = call
     v = {"state": c["state"], "stt": MODEL is not None}
     if role == "mum":
         mum_seen = time.time()
         v["ver"] = page_ver()
+        if frames is not None and frames != mum_frames["n"]:
+            mum_frames.update(n=frames, changed=time.time())
     if role == "caller" and cid and last_end.get("id") == cid:
         v["ended"] = last_end["reason"]
     if c["state"] == "idle":
@@ -468,12 +477,21 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self._json(503, {"error": "no screenshot"})
         elif u.path == "/api/health":
-            self._json(200, {"ok": True, "mum_age": int(time.time() - mum_seen)})
+            now = time.time()
+            self._json(200, {
+                "ok": True, "mum_age": int(now - mum_seen),
+                "frozen": int(now - mum_frames["changed"]),   # seconds since the page last drew a frame
+                "page_stuck": now - page_stuck["at"] < 120,    # a call went unanswered while the page was polling
+            })
         elif u.path == "/api/call":
             role = q.get("role", [""])[0]
             if role == "mum" and not self._on_pi():
                 return self._tv_only()
-            self._json(200, call_view(role, q.get("id", [""])[0]))
+            try:
+                frames = int(q["frames"][0]) if "frames" in q else None
+            except ValueError:
+                frames = None
+            self._json(200, call_view(role, q.get("id", [""])[0], frames))
         else:
             self._json(404, {"error": "not found"})
 

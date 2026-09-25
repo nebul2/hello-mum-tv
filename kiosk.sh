@@ -5,6 +5,7 @@
 # (crashed tab, error page, hung browser).
 URL=http://localhost:8080/mum
 HEALTH=http://localhost:8080/api/health
+CALL="http://localhost:8080/api/call?role=x"
 
 # The TV going to sleep can leave the Pi's HDMI output switched off, so the TV shows
 # "no signal" when it wakes. Switch any connected-but-disabled output back on.
@@ -38,6 +39,7 @@ while :; do
         --password-store=basic --autoplay-policy=no-user-gesture-required \
         --use-fake-ui-for-media-stream "$URL" &
     pid=$!
+    started=$(date +%s)
 
     bad=0
     while kill -0 "$pid" 2>/dev/null; do
@@ -46,9 +48,19 @@ while :; do
         fix_audio
         # Only judge the page while the server is answering; if the server is
         # down the page keeps polling and recovers by itself.
-        age=$(curl -sf -m 5 "$HEALTH" | sed -n 's/.*"mum_age": *\([0-9]*\).*/\1/p')
-        if [ -n "$age" ] && [ "$age" -gt 60 ]; then bad=$((bad + 1)); else bad=0; fi
-        [ "$bad" -ge 3 ] && break
+        h=$(curl -sf -m 5 "$HEALTH") || continue
+        age=$(echo "$h" | sed -n 's/.*"mum_age": *\([0-9]*\).*/\1/p')
+        frozen=$(echo "$h" | sed -n 's/.*"frozen": *\([0-9]*\).*/\1/p')
+        if [ "${age:-0}" -gt 60 ]; then bad=$((bad + 1)); else bad=0; fi
+        [ "$bad" -ge 3 ] && { echo "$(date +%T) page stopped polling"; break; }
+        # polling but no longer drawing (white screen), or a call went unanswered
+        [ "${frozen:-0}" -gt 60 ] && { echo "$(date +%T) page frozen for ${frozen}s"; break; }
+        echo "$h" | grep -q '"page_stuck": true' && { echo "$(date +%T) call unanswered"; break; }
+        # once a day, in the small hours, start Chromium fresh (never during a call)
+        if [ "$(date +%H)" = "04" ] && [ $(( $(date +%s) - started )) -gt 72000 ] \
+           && curl -sf -m 5 "$CALL" | grep -q '"idle"'; then
+            echo "$(date +%T) nightly restart"; break
+        fi
     done
 
     kill "$pid" 2>/dev/null
