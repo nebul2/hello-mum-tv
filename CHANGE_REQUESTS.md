@@ -7,7 +7,7 @@ Site-specific values (addresses, names, tailnet) never go in this file.
 
 | CR | Title | Priority | Status |
 |----|-------|----------|--------|
-| 01 | Clear acceptance by the person being called | P0 | open |
+| 01 | Clear acceptance by the person being called | P0 | in progress |
 | 02 | Unmissable "camera is on" light | P0 | open |
 | 03 | Lock the TV page (`/mum`) to the Pi itself | P0 | done |
 | 04 | Restrict shared users to HTTPS only (Tailscale ACL) | P1 | parked |
@@ -54,6 +54,15 @@ cameras in a client's home. Check both before wider use.
    block it. Agree it with the care provider.
 7. Record the consent / best-interests decision outside this repo and review it
    regularly.
+
+**2026-09-26: "look in first" built (item 1, partly).** Pressing Call Mum no longer rings.
+The TV switches to the Pi screen and shows "X is about to call. Wave your hands if you
+don't want this." with the light on; the caller gets a pixelated view of the room
+(very coarse for 3 s, then moderate, then mild) refreshed every 1.5 s, and chooses
+Call now or Not now. Not now: camera off, TV shows "X will call later", programme
+restored, logged as "looked in but did not call". Frames live in memory only and are
+gone the moment the preview ends; 45 s limit. Reason: family should not walk in on
+personal care. Still open from item 1: a sound on the TV. Items 2-7 unchanged.
 
 **Acceptance.** A stranger reading the notice understands the system in 30 seconds. The
 person or a carer can refuse or end a call without touching a screen. No call can start

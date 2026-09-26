@@ -30,6 +30,7 @@ PORT = 8080
 PI_INPUT = "tvinput.hdmi1"   # TV input the Pi is plugged into (hdmi1/hdmi2/hdmi3)
 LED_PIN = 17                 # GPIO for the red "on a call" light
 RING_TIMEOUT = 30            # seconds before an unanswered call is dropped
+PREVIEW_TIMEOUT = 45         # seconds a caller may look at the pixelated preview before deciding
 CAMERA_DEV = "/dev/video0"   # webcam, for zoom / pan / tilt during calls (UVC controls)
 CAM_ZOOM_MAX = 9             # zoom_absolute range is 0..CAM_ZOOM_MAX
 CAM_PT_MAX = 36000           # pan_absolute / tilt_absolute range is -MAX..MAX
@@ -318,7 +319,6 @@ def tv_to_call(c):
         else:
             c["prev_app"], _ = tv_app()
         tv(f"/launch/{PI_INPUT}", post=True)
-        call_volume_up(c)
     except Exception as e:
         print(f"TV switch failed: {e}", flush=True)
 
@@ -350,7 +350,11 @@ def end_call(reason, cid=None):
     light(False)
     threading.Thread(target=cam_move, args=("reset",), daemon=True).start()
     mins = (time.time() - old["started"]) / 60
-    print(f"call from {old['caller']} ended after {mins:.1f} min: {reason}", flush=True)
+    last_end["at"], last_end["caller"] = time.time(), old["caller"]
+    if old["state"] == "preview":
+        print(f"{old['caller']} looked in but did not call: {reason}", flush=True)
+    else:
+        print(f"call from {old['caller']} ended after {mins:.1f} min: {reason}", flush=True)
     threading.Thread(target=tv_restore, args=(old,), daemon=True).start()
 
 
@@ -368,7 +372,9 @@ def watchdog():
                     vol_preset(target)
             except Exception:
                 pass
-        if c["state"] == "ringing" and time.time() - c["started"] > RING_TIMEOUT:
+        if c["state"] == "preview" and time.time() - c["started"] > PREVIEW_TIMEOUT:
+            end_call("preview timed out", c["id"])
+        elif c["state"] == "ringing" and time.time() - c["started"] > RING_TIMEOUT:
             if time.time() - mum_seen < 5:
                 page_stuck["at"] = time.time()
                 print("TV page is polling but did not answer: asking kiosk to restart it", flush=True)
@@ -400,9 +406,13 @@ def call_view(role, cid, frames=None):
             mum_frames.update(n=frames, changed=time.time())
     if role == "caller" and cid and last_end.get("id") == cid:
         v["ended"] = last_end["reason"]
+    if role == "mum" and last_end.get("reason") == "not now" and time.time() - last_end.get("at", 0) < 8:
+        v["later"] = last_end["caller"]      # the TV says "X will call later" for a moment
     if c["state"] == "idle":
         return v
     v.update(id=c["id"], caller=c["caller"], caption=caption(c))
+    if role == "caller" and c["state"] == "preview":
+        v["frame_at"] = c.get("frame_at", 0)
     if role == "caller":
         v["vol"] = dict(vol)
         v["cam"] = dict(cam)
@@ -483,6 +493,13 @@ class Handler(BaseHTTPRequestHandler):
                 "frozen": int(now - mum_frames["changed"]),   # seconds since the page last drew a frame
                 "page_stuck": now - page_stuck["at"] < 120,    # a call went unanswered while the page was polling
             })
+        elif u.path == "/api/call/frame":
+            # the pixelated preview, for the caller who asked for it, while deciding
+            c = call
+            if c["state"] == "preview" and c["id"] == q.get("id", [""])[0] and c.get("frame"):
+                self._send(200, c["frame"], "image/jpeg")
+            else:
+                self._json(404, {"error": "no preview"})
         elif u.path == "/api/call":
             role = q.get("role", [""])[0]
             if role == "mum" and not self._on_pi():
@@ -527,6 +544,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(400, {"error": "not allowed"})
             return self._json(200, cam_move(parts[2]))
 
+        # --- preview frames from the TV page: tiny pixelated JPEGs, memory only
+        if u.path == "/api/call/frame":
+            if not self._on_pi():
+                return self._tv_only()
+            data, c = self._body(50_000), call
+            if c["state"] == "preview" and c["id"] == q.get("id", [""])[0] and data:
+                c["frame"], c["frame_at"] = data, time.time()
+            return self._json(200, {"ok": True})
+
         # --- call control
         if parts[:2] == ["api", "call"] and len(parts) == 3:
             try:
@@ -535,26 +561,40 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(400, {"error": "bad request"})
             if parts[2] in ("answer", "level") and not self._on_pi():
                 return self._tv_only()
-            if parts[2] == "start":
+            if parts[2] == "preview":
+                # Step 1: the TV announces who is about to call and sends the caller a
+                # pixelated view of the room; the caller then picks "Call now" or "Not now".
                 name = re.sub(r"[^\w .'-]", "", str(body.get("name", "")))[:30].strip() or "Family"
-                offer = str(body.get("offer", ""))
-                if not offer:
-                    return self._json(400, {"error": "no offer"})
                 with lock:
                     if call["state"] != "idle":
                         return self._json(409, {"error": "busy"})
                     call = {
-                        "state": "ringing", "id": uuid.uuid4().hex[:12], "caller": name,
-                        "offer": offer, "answer": None, "started": time.time(),
+                        "state": "preview", "id": uuid.uuid4().hex[:12], "caller": name,
+                        "offer": None, "answer": None, "started": time.time(),
                         "seen": time.time(), "prev_app": None, "was_off": False,
+                        "frame": None, "frame_at": 0,
                         "rec": KaldiRecognizer(MODEL, 16000) if MODEL else None,
                         "finals": [], "partial": "",
                     }
                     c = call
                 light(True)
                 cam_move("reset")
-                print(f"call from {name} ({self._who()}) started", flush=True)
+                print(f"{name} ({self._who()}) is looking in before calling", flush=True)
                 threading.Thread(target=tv_to_call, args=(c,), daemon=True).start()
+                return self._json(200, {"id": c["id"]})
+            if parts[2] == "start":
+                # Step 2: the caller confirmed; ring the TV with the WebRTC offer
+                offer = str(body.get("offer", ""))
+                if not offer:
+                    return self._json(400, {"error": "no offer"})
+                with lock:
+                    if call["state"] != "preview" or call["id"] != body.get("id"):
+                        return self._json(409, {"error": "no preview"})
+                    call.update(state="ringing", offer=offer, started=time.time(),
+                                seen=time.time(), frame=None)
+                    c = call
+                print(f"call from {c['caller']} ({self._who()}) started", flush=True)
+                threading.Thread(target=call_volume_up, args=(c,), daemon=True).start()
                 return self._json(200, {"id": c["id"]})
             if parts[2] == "answer":
                 with lock:

@@ -14,6 +14,10 @@ run unattended for months.
 
 ## What it does
 
+- **Look in first**: pressing Call Mum makes the TV say "X is about to call, wave your
+  hands if you don't want this", and shows the caller a pixelated view of the room that
+  sharpens a little over a few seconds. Call now, or Not now. So nobody walks in on
+  personal care.
 - **Call Mum**: WebRTC video call from any phone or laptop browser to the TV.
   Auto-answers. Wakes the TV, remembers what was on, restores it after.
 - **Live subtitles** of the caller's speech on the TV (offline, [Vosk](https://alphacephei.com/vosk/)),

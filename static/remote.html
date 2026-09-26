@@ -86,6 +86,14 @@ summary{cursor:pointer;font-weight:700;padding:10px 2px;color:var(--soft)}
 #callview .camctl button{min-height:46px;padding:4px;font-size:1.05rem}
 #callview .camctl .reset{font-size:.8rem}
 .callctl{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+/* "about to call" step: pixelated view of the room, then Call now / Not now */
+#peek{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:none;image-rendering:pixelated}
+.peekbar{display:none;grid-template-columns:1fr 1fr;gap:10px}
+.peeknote{display:none;margin:0 4px;font-size:.95rem;color:#AFC0C9}
+#callview.preview #peek{display:block}
+#callview.preview .peekbar{display:grid}
+#callview.preview .peeknote{display:block}
+#callview.preview .camctl, #callview.preview .callctl, #callview.preview #caption, #callview.preview .callinfo, #callview.preview #meVideo{display:none}
 .callctl .wide{grid-column:1 / -1}
 
 .toast{position:fixed;z-index:20;left:50%;bottom:calc(18px + env(safe-area-inset-bottom,0));transform:translateX(-50%);
@@ -193,7 +201,13 @@ summary{cursor:pointer;font-weight:700;padding:10px 2px;color:var(--soft)}
   <div class="stage">
     <video id="mumVideo" autoplay playsinline></video>
     <video id="meVideo" autoplay playsinline muted></video>
+    <img id="peek" alt="Pixelated view of Mum's room">
     <div id="callStatus"></div>
+  </div>
+  <p class="peeknote">Mum's TV is saying you're about to call, and to wave if it's not a good time. Nothing is recorded.</p>
+  <div class="peekbar">
+    <button class="louder" id="callNowBtn">Call now</button>
+    <button class="hang" id="notNowBtn">Not now</button>
   </div>
   <div id="caption" aria-live="polite"></div>
   <div class="callinfo">
@@ -317,18 +331,37 @@ function iceDone(p){
 }
 const postJSON = (url, obj) => fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(obj)});
 
-async function startCall(){
+let peekAt = 0;
+
+/* step 1: look in. The TV announces the caller; we get a pixelated view and decide. */
+async function lookIn(){
   const name = $('name').value.trim();
   if(!name){ say('Type your name first, so Mum knows who is calling.'); $('name').focus(); return; }
   localStorage.setItem('callerName', name);
   if(!window.isSecureContext || !navigator.mediaDevices){ say('Calls need the https:// address of this page.'); return; }
-  openView('Starting your camera…');
+  openView("Asking Mum's TV…");
+  $('callview').classList.add('preview'); $('peek').removeAttribute('src'); peekAt = 0;
+  let r;
+  try{ r = await postJSON('/api/call/preview', {name}); }
+  catch(e){ closeView(); say("Couldn't reach the Pi. Check Tailscale is on."); return; }
+  if(r.status === 409){ closeView(); say('Someone else is already on a call with Mum.'); return; }
+  if(!r.ok){ closeView(); say("The Pi didn't respond. Try again."); return; }
+  callId = (await r.json()).id;
+  pollT = setInterval(pollCall, 1000);
+}
+
+/* step 2: call now */
+async function startCall(){
+  if(!callId) return;
+  const name = $('name').value.trim();
+  $('callview').classList.remove('preview'); $('peek').removeAttribute('src');
+  setStatus('Starting your camera…');
   try{
     localStream = await navigator.mediaDevices.getUserMedia({
       audio:{echoCancellation:true, noiseSuppression:true, autoGainControl:true},
       video:{width:{ideal:640}, height:{ideal:480}, facingMode:'user'}
     });
-  }catch(e){ closeView(); say('Allow camera and microphone to call Mum.'); return; }
+  }catch(e){ hangUp('no camera', 'Allow camera and microphone to call Mum.'); return; }
   $('meVideo').srcObject = localStream;
   pc = new RTCPeerConnection({iceServers:[]});
   localStream.getTracks().forEach(t=>pc.addTrack(t, localStream));
@@ -342,12 +375,10 @@ async function startCall(){
   await iceDone(pc);
   setStatus('Calling Mum…');
   let r;
-  try{ r = await postJSON('/api/call/start', {name, offer:pc.localDescription.sdp}); }
+  try{ r = await postJSON('/api/call/start', {id:callId, name, offer:pc.localDescription.sdp}); }
   catch(e){ teardown(); closeView(); say("Couldn't reach the Pi. Check Tailscale is on."); return; }
-  if(r.status === 409){ teardown(); closeView(); say('Someone else is already on a call with Mum.'); return; }
+  if(r.status === 409){ teardown(); closeView(); say('The preview timed out. Try again.'); return; }
   if(!r.ok){ teardown(); closeView(); say("The Pi didn't start the call. Try again."); return; }
-  callId = (await r.json()).id;
-  pollT = setInterval(pollCall, 1000);
 }
 
 async function pollCall(){
@@ -356,8 +387,13 @@ async function pollCall(){
     const s = await (await fetch('/api/call?role=caller&id=' + callId)).json();
     if(s.id !== callId){
       const why = {'no answer':"Mum's screen didn't answer. Check the Pi is switched on.",
-                   'caller gone':'The call timed out.'}[s.ended] || 'Call ended.';
+                   'caller gone':'The call timed out.',
+                   'preview timed out':"You didn't choose in time. Press Call Mum again."}[s.ended] || 'Call ended.';
       hangUp(null, why); return;
+    }
+    if(s.state === 'preview'){
+      if(s.frame_at && s.frame_at !== peekAt){ peekAt = s.frame_at; $('peek').src = '/api/call/frame?id=' + callId + '&t=' + peekAt; setStatus(''); }
+      return;
     }
     if(s.answer && !answered){
       answered = true;
@@ -383,10 +419,12 @@ function teardown(){
 
 function hangUp(reason, msg){
   if(callId && reason) postJSON('/api/call/end', {id:callId, reason}).catch(()=>{});
-  teardown(); closeView(); if(msg) say(msg);
+  teardown(); closeView(); $('callview').classList.remove('preview'); if(msg) say(msg);
 }
 
-$('callBtn').addEventListener('click', startCall);
+$('callBtn').addEventListener('click', lookIn);
+$('callNowBtn').addEventListener('click', startCall);
+$('notNowBtn').addEventListener('click', ()=>hangUp('not now', "OK, not now. Mum's TV says you'll call later."));
 $('hangBtn').addEventListener('click', ()=>hangUp('hung up'));
 $('micBtn').addEventListener('click', ()=>{
   const t = localStream && localStream.getAudioTracks()[0]; if(!t) return;

@@ -24,6 +24,8 @@ body{font-family:"Atkinson Hyperlegible",system-ui,sans-serif}
 #status{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
   font-size:6vw;font-weight:700;text-align:center;padding:0 6vw}
 #status:empty{display:none}
+#status{white-space:pre-line}
+#note{font-size:4vw;color:#FFE27A;margin-top:2vw;min-height:1.2em}
 #caption{position:absolute;left:4vw;right:4vw;bottom:4vh;text-align:center;white-space:pre-line;
   font-size:4.6vw;font-weight:700;line-height:1.25;color:#FFE27A;
   background:rgba(0,0,0,.72);border-radius:1.2vw;padding:1vw 2vw}
@@ -35,6 +37,7 @@ body{font-family:"Atkinson Hyperlegible",system-ui,sans-serif}
   <div id="part"></div>
   <div id="time"></div>
   <div id="date"></div>
+  <div id="note"></div>
 </div>
 
 <div id="call">
@@ -59,6 +62,7 @@ tick(); setInterval(tick, 10000);
 
 /* ---------- call ---------- */
 let pc = null, stream = null, callId = null, handled = null, stt = null, meter = null;
+let previewing = null, pv = null;
 
 function iceDone(p){
   return new Promise(res=>{
@@ -144,7 +148,42 @@ function stopMeter(){
   meter = null;
 }
 
+/* ---------- "about to call": announce on the TV, send the caller a pixelated view ----------
+   Blocks get finer over the first seconds: very coarse, then moderate, then mild, so the
+   caller can tell "someone is at the bed" before they can see anything else. */
+async function startPreview(s){
+  showCall(s.caller);
+  $('status').textContent = s.caller + ' is about to call.\nWave your hands if you don\'t want this.';
+  const id = s.id;
+  try{
+    const raw = await navigator.mediaDevices.getUserMedia({video:{width:{ideal:320}, height:{ideal:180}}});
+    if(previewing !== id){ raw.getTracks().forEach(t=>t.stop()); return; }
+    const v = document.createElement('video'); v.muted = true; v.playsInline = true; v.srcObject = raw; await v.play();
+    const small = document.createElement('canvas'), big = document.createElement('canvas');
+    big.width = 320; big.height = 180;
+    const started = Date.now();
+    const timer = setInterval(()=>{
+      const t = (Date.now() - started) / 1000, blocks = t < 3 ? 16 : t < 6 ? 32 : 64;
+      small.width = blocks; small.height = Math.round(blocks * 9 / 16);
+      small.getContext('2d').drawImage(v, 0, 0, small.width, small.height);
+      const g = big.getContext('2d'); g.imageSmoothingEnabled = false;
+      g.drawImage(small, 0, 0, big.width, big.height);
+      big.toBlob(b => { if(b && previewing === id) fetch('/api/call/frame?id=' + id, {method:'POST', body:b}).catch(()=>{}); }, 'image/jpeg', 0.6);
+    }, 1500);
+    pv = {raw, timer, v};
+  }catch(e){ console.error(e); }
+}
+function stopPreview(){
+  if(!pv) return;
+  clearInterval(pv.timer); pv.raw.getTracks().forEach(t=>t.stop()); pv.v.srcObject = null; pv = null;
+}
+function showLater(name){
+  $('note').textContent = name + ' will call later';
+  setTimeout(()=>{ $('note').textContent = ''; }, 8000);
+}
+
 function teardown(){
+  stopPreview(); previewing = null;
   stopMeter();
   if(stt){ try{ stt.ctx.close(); }catch(e){} stt = null; }
   if(pc){ pc.close(); pc = null; }
@@ -196,15 +235,16 @@ let frames = 0;
 async function poll(){
   let s;
   try{ s = await (await fetch('/api/call?role=mum&frames=' + frames)).json(); }catch(e){ return; }
-  if(s.ver){ if(ver === null) ver = s.ver; else if(s.ver !== ver && !callId && s.state === 'idle') return safeReload(); }
-  if(s.state === 'ringing' && s.id !== handled && !pc){ handled = s.id; answer(s); }
-  else if(s.state === 'idle' && callId){ teardown(); }
+  if(s.ver){ if(ver === null) ver = s.ver; else if(s.ver !== ver && !callId && !previewing && s.state === 'idle') return safeReload(); }
+  if(s.state === 'preview' && s.id !== previewing && !pc){ previewing = s.id; startPreview(s); }
+  else if(s.state === 'ringing' && s.id !== handled && !pc){ handled = s.id; stopPreview(); answer(s); }
+  else if(s.state === 'idle' && (callId || previewing)){ teardown(); if(s.later) showLater(s.later); }
   else if(s.state === 'active' && s.id === callId && !stt){ $('caption').textContent = s.caption || ''; }
 }
 setInterval(poll, 1000);
 
 /* fresh start every 6 hours when nobody is calling */
-setInterval(()=>{ if(!callId) safeReload(); }, 6 * 3600 * 1000);
+setInterval(()=>{ if(!callId && !previewing) safeReload(); }, 6 * 3600 * 1000);
 </script>
 </body>
 </html>

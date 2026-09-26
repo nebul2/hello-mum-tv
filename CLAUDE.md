@@ -47,6 +47,10 @@ screen with live subtitles, then puts the TV back as it was. Runs unattended for
   127.0.0.1, which is why the header check matters.
 - Camera zoom / pan / tilt are UVC controls set with `v4l2-ctl` while Chromium streams;
   pan + = right, tilt + = down on the current camera; reset to wide at call start and end.
+- Calls are two steps: `POST /api/call/preview` (state `preview`: TV announces the
+  caller, sends pixelated frames to `/api/call/frame`, caller decides) then
+  `POST /api/call/start` with the same id (state `ringing`, volume preset runs). The TV
+  switches input at preview; volume changes only on Call now.
 - Subtitles are roll-up: wrapped from the start of each utterance, last
   `CAPTION_LINES` lines only, so a long monologue never fills the screen.
 - The server also runs on a laptop with a dummy TV address (see README, "Hacking on
