@@ -163,7 +163,7 @@ async function startPreview(s){
     big.width = 320; big.height = 180;
     const started = Date.now();
     const timer = setInterval(()=>{
-      const t = (Date.now() - started) / 1000, blocks = t < 3 ? 16 : t < 6 ? 32 : 64;
+      const t = (Date.now() - started) / 1000, blocks = t < 3 ? 32 : t < 6 ? 64 : 128;   /* blocks across; 320 = no pixelation */
       small.width = blocks; small.height = Math.round(blocks * 9 / 16);
       small.getContext('2d').drawImage(v, 0, 0, small.width, small.height);
       const g = big.getContext('2d'); g.imageSmoothingEnabled = false;
