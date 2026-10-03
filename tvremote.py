@@ -48,6 +48,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 MODEL_DIR = os.path.join(HERE, "model")
 STATIC = os.path.join(HERE, "static")
 VOL_FILE = os.path.join(HERE, "volume.json")   # remembers the estimate across restarts
+try:   # written by deploy.sh: git commit, "+" for uncommitted edits, deploy time
+    with open(os.path.join(HERE, "VERSION")) as _f:
+        VERSION = _f.read().strip() or "dev"
+except OSError:
+    VERSION = "dev"
 
 KEYS = {
     "PowerOn", "PowerOff", "VolumeUp", "VolumeDown", "VolumeMute",
@@ -118,7 +123,7 @@ def tv_app():
 
 
 def status():
-    s = {"reachable": False}
+    s = {"reachable": False, "version": VERSION}
     try:
         s["power"] = tv_power()
         s["reachable"] = True
@@ -471,7 +476,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def _file(self, name):
         with open(os.path.join(STATIC, name), "rb") as f:
-            self._send(200, f.read(), "text/html; charset=utf-8")
+            page = f.read().replace(b"{{VERSION}}", VERSION.encode())
+        self._send(200, page, "text/html; charset=utf-8")
 
     def do_GET(self):
         u = urllib.parse.urlparse(self.path)

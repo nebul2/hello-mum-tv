@@ -21,6 +21,8 @@ html,body{margin:0;background:var(--bg);color:var(--ink)}
 body{font-family:"Atkinson Hyperlegible",system-ui,-apple-system,"Segoe UI",sans-serif;
   font-size:18px;line-height:1.4;padding:env(safe-area-inset-top,0) 16px calc(24px + env(safe-area-inset-bottom,0));}
 main{max-width:460px;margin:0 auto}
+.ver{font-size:.8rem;color:var(--soft);text-align:center;margin:18px 0 8px}
+.ver a{color:inherit}
 h1{font-size:1.1rem;font-weight:700;margin:18px 2px 10px;color:var(--soft)}
 
 .screen{background:var(--glass);border-radius:22px;padding:10px;box-shadow:0 0 0 6px var(--panel), 0 0 0 7px var(--line)}
@@ -195,6 +197,7 @@ summary{cursor:pointer;font-weight:700;padding:10px 2px;color:var(--soft)}
       <button data-key="Info">Options</button>
     </div>
   </details>
+  <p class="ver">Version <span id="ver">{{VERSION}}</span> <a id="newVer" href="" hidden>New version on the Pi: tap to reload</a></p>
 </main>
 
 <div id="callview" role="dialog" aria-label="Call with Mum">
@@ -245,6 +248,8 @@ function volText(v){
   return v.est === null ? '' : 'TV volume about ' + v.est;
 }
 function render(s){
+  /* a tab left open for days runs the old page: offer the new one (not mid-call, reload hangs up) */
+  $('newVer').hidden = !(s && s.version && s.version !== $('ver').textContent && !callId);
   if(s && s.vol) $('volNote').textContent = volText(s.vol) ||
     'Volume unknown. Normal, Loud or Very loud sets a known level. Mum\'s own remote can change it.';
   glass.className = 'glass';

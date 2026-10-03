@@ -5,6 +5,10 @@ set -eu
 HOST=${1:-${MUMPI_HOST:-mum-pi}}
 cd "$(dirname "$0")"
 
+# version shown on the family page: commit, "+" if there are uncommitted edits, when
+VER="$(git rev-parse --short HEAD 2>/dev/null || echo nogit)$(git diff --quiet HEAD 2>/dev/null || echo +) $(date '+%Y-%m-%d %H:%M')"
+echo "$VER" | ssh "$HOST" 'mkdir -p tvremote && cat > tvremote/VERSION'
+
 rsync -a --exclude '.*' --exclude __pycache__ --exclude '*.md' --exclude LICENSE \
     --exclude config.example.json --exclude deploy.sh ./ "$HOST":tvremote/
 
