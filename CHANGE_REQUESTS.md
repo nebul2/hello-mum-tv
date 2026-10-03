@@ -320,3 +320,21 @@ while the page was polling); `kiosk.sh` restarts Chromium on either, and once a 
    automatically after every call start.
 3. Remote page: show "TV sound: OK / lost" from a `/api/health` field.
 
+
+## CR-18 TV page freezes after camera zoom / pan (P1, mitigated, watching)
+
+**Seen 2026-10-03.** White screen mid-call; call dropped "connection failed".
+`/tmp/kiosk.log`: `page frozen for 66s`, Chromium restarted, page healthy again. Kernel
+logged UVC control traffic 25 s before the freeze: the caller had pressed zoom / pan.
+The two earlier freezes (2026-09-26 11:07, 2026-10-01 15:38) began ~37 s after a call
+ended, when the camera is reset to wide. Memory, temperature and throttling were fine.
+Suspect: changing UVC controls (`v4l2-ctl`) on this wireless webcam while Chromium
+streams stalls the capture and hangs the renderer. Not proven.
+
+**Mitigation.** `cam_move` only calls `v4l2-ctl` when the view really changes (no reset
+after a call where nobody zoomed) and logs every move. `kiosk.sh` restarts Chromium
+after 20 s frozen during a call (60 s otherwise).
+
+**Next.** If a freeze follows a logged camera move again: hide the camera buttons, or
+change controls only before Chromium opens the camera. A plain wired UVC webcam may not
+have the problem.

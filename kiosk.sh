@@ -57,7 +57,10 @@ while :; do
         if [ "${age:-0}" -gt 60 ]; then bad=$((bad + 1)); else bad=0; fi
         [ "$bad" -ge 3 ] && { echo "$(date +%T) page stopped polling"; break; }
         # polling but no longer drawing (white screen), or a call went unanswered
-        [ "${frozen:-0}" -gt 60 ] && { echo "$(date +%T) page frozen for ${frozen}s"; break; }
+        # (a caller is watching during a call, so give up sooner then)
+        limit=60
+        curl -sf -m 5 "$CALL" | grep -q '"idle"' || limit=20
+        [ "${frozen:-0}" -gt "$limit" ] && { echo "$(date +%T) page frozen for ${frozen}s"; break; }
         echo "$h" | grep -q '"page_stuck": true' && { echo "$(date +%T) call unanswered"; break; }
         # once a day, in the small hours, start Chromium fresh (never during a call)
         if [ "$(date +%H)" = "04" ] && [ $(( $(date +%s) - started )) -gt 72000 ] \

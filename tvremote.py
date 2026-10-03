@@ -244,6 +244,7 @@ def call_volume_back(c):
 # and ends on the wide view, so nobody is left zoomed in on part of the room.
 cam_lock = threading.Lock()
 cam = {"zoom": 0, "pan": 0, "tilt": 0}
+cam_set = {}   # what the camera was last told; empty = unknown, so the first reset is sent
 CAM_ACTIONS = {"zoomin": ("zoom", 1), "zoomout": ("zoom", -1), "right": ("pan", 1),
                "left": ("pan", -1), "down": ("tilt", 1), "up": ("tilt", -1), "reset": None}
 
@@ -260,6 +261,13 @@ def cam_move(action):
                     cam.update(pan=0, tilt=0)     # the wide view cannot be moved
             else:
                 cam[axis] = max(-CAM_PT_MAX, min(CAM_PT_MAX, cam[axis] + sign * CAM_PT_STEP))
+        # Changing UVC controls while Chromium streams has frozen the TV page, so
+        # only talk to the camera when the view really changes.
+        if cam == cam_set:
+            return dict(cam)
+        print(f"camera {action}: zoom {cam['zoom']} pan {cam['pan']} tilt {cam['tilt']}", flush=True)
+        cam_set.clear()
+        cam_set.update(cam)
         try:
             subprocess.run(
                 ["v4l2-ctl", "-d", CAMERA_DEV, "-c",
